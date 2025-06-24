@@ -28,15 +28,22 @@ class functor (f: Type u#(a+1) -> Type u#(a+1)) = {
 }
 
 val knot_t #f (ff: functor u#a f) : Type u#(a+1)
-let predicate #f (ff: functor u#a f) = knot_t ff ^-> prop
-val level #f (#ff: functor f) (x:knot_t ff) : GTot nat
-val pack #f (#ff: functor f) (n: Ghost.erased nat) : f (predicate ff) -> knot_t ff
+let predicate #f (ff: functor u#a f) = nat ^-> knot_t ff ^-> prop
+val pack #f (#ff: functor f) : f (predicate ff) -> knot_t ff
 val unpack #f (#ff: functor f) : knot_t ff -> f (predicate ff)
 
-let approx #f (#ff: functor u#a f) (n:nat) : (predicate ff ^-> predicate ff) =
+let approx_predicate #f (#ff: functor u#a f) (n: nat) : (predicate ff ^-> predicate ff) =
   on_dom (predicate ff) #(fun _ -> predicate ff) fun p ->
-    on_dom _ #(fun _ -> prop) fun w -> if level w >= n then False else p w
+  on_dom nat #(fun _ -> knot_t ff ^-> prop) fun i ->
+  on_dom _ #(fun _ -> prop) fun w ->
+  if i >= n then False else p i w
 
-val pack_unpack #f (#ff: functor f) : x:knot_t ff -> squash (pack (level x) (unpack x) == x)
-val unpack_pack #f (#ff: functor f) (n:nat) (x: f (predicate ff)) :
-  squash (level (pack n x) == n /\ unpack #f (pack n x) == fmap #f (approx #f n) x)
+let approx #f (#ff: functor u#a f) : (predicate ff ^-> predicate ff) =
+  on_dom (predicate ff) #(fun _ -> predicate ff) fun p ->
+  on_dom nat #(fun _ -> knot_t ff ^-> prop) fun i ->
+  on_dom _ #(fun _ -> prop) fun w ->
+  p i (pack (ff.fmap (approx_predicate i) (unpack w)))
+
+val pack_unpack #f (#ff: functor f) : x:knot_t ff -> squash (pack (unpack x) == x)
+val unpack_pack #f (#ff: functor f) (x: f (predicate ff)) :
+  squash (unpack #f (pack x) == fmap #f (approx #f) x)

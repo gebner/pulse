@@ -35,32 +35,88 @@ let k'_unfold #f (#ff: functor u#a f) (#n: Ghost.erased nat) (x: k' ff n) : f (p
 let k'_fold #f (#ff: functor u#a f) (#n: Ghost.erased nat) (x: f (pred' ff n (k' ff))) : k' ff n =
   k'_eq ff n; x
 
-type knot_t #f (ff: functor f) = m: Ghost.erased nat & k' #f ff m
+type punit : Type u#a = | PUnit
+let const #a #b (x: b) : (a ^-> b) = on_dom _ fun _ -> x
+let shape #f (ff: functor f) #a (x: f a) : f punit =
+  ff.fmap (const PUnit) x
 
-let unpack_pred #f (#ff: functor u#a f) n (x: pred' ff n (k' ff)) : predicate ff =
-  on_dom (knot_t ff) #(fun _ -> prop) fun (|m, h|) -> if m < n then x m h else False
+type pred'' #f (ff: functor u#a f) =
+  restricted_t nat fun m -> k' ff m ^-> prop
+type knot_t #f (ff: functor u#a f) =
+  f (pred'' ff)
 
-let pack_pred #f (#ff: functor u#a f) n (x: predicate ff) : pred' ff n (k' ff) =
-  on_dom (m:nat {m<n}) fun m -> on_dom _ fun h -> x (| Ghost.hide m, h |)
+let approx_pred' #f (#ff: functor u#a f) n : (pred'' ff ^-> pred' ff n (k' ff)) =
+  on_dom (pred'' ff) fun p -> on_dom (m:nat { m < n }) fun m -> on_dom _ fun x -> p m x
 
-let pack_unpack_pred #f (ff: functor u#a f) #n (x: pred' ff n (k' ff)) =
-  f_ext (pack_pred n (unpack_pred n x)) x fun m ->
-    f_ext (pack_pred n (unpack_pred n x) m) (x m) fun x -> ()
+let extend_pred' #f (#ff: functor u#a f) n : (pred' ff n (k' ff) ^-> pred'' ff) =
+  on_dom (pred' ff n (k' ff)) #(fun _ -> pred'' ff) fun p ->
+  on_dom nat #(fun m -> k' ff m ^-> prop) fun m ->
+  on_dom (k' ff m) #(fun _ -> prop) fun y ->
+  if m < n then p m y else False
 
-let level #f #ff x = dfst x
-let pack #f #ff m x = (| m, k'_fold (ff.fmap (pack_pred #f #ff m) x) |)
-let unpack #f #ff x = ff.fmap (unpack_pred (dfst x)) (k'_unfold (dsnd x))
+let approx_extend_pred' #f (#ff: functor f) n (p: pred' ff n (k' ff)) =
+  f_ext (approx_pred' n (extend_pred' n p)) p fun m ->
+  f_ext (approx_pred' n (extend_pred' n p) m) (p m) fun x ->
+  assert_norm (approx_pred' n (extend_pred' n p) m x == (if m < n then p m x else False))
 
-let unpack_pack_pred #f (#ff: functor u#a f) (n:nat) (x: predicate ff) =
-  f_ext ((unpack_pred n (pack_pred n x))) (approx n x) fun _ -> ()
+let extend' #f (#ff: functor u#a f) n (x: k' ff n) : knot_t ff =
+  ff.fmap (extend_pred' n) (k'_unfold x)
 
-let pack_unpack #f #ff (| n, h |) =
-  let h = k'_unfold h in
-  ff.fmap_comp (pred' ff n (k' ff)) _ (pred' ff n (k' ff)) (pack_pred n) (unpack_pred n);
-  f_ext (compose (pack_pred n) (unpack_pred #f #ff n)) id (pack_unpack_pred ff);
-  ff.fmap_id _ h;
-  assert ff.fmap id h == h
+let approx' #f (#ff: functor u#a f) n (k: knot_t ff) : k' ff n =
+  k'_fold (ff.fmap (approx_pred' n) k)
 
-let unpack_pack #f #ff n h =
-  ff.fmap_comp _ _ _ (unpack_pred n) (pack_pred #f #ff n);
-  f_ext (compose (unpack_pred n) (pack_pred #f #ff n)) (approx n) fun x -> unpack_pack_pred n x
+let approx_extend' #f (#ff: functor u#a f) n (x: k' ff n) : Lemma (approx' n (extend' n x) == x) =
+  let x = k'_unfold x in
+  ff.fmap_id _ x;
+  ff.fmap_comp _ _ _ (approx_pred' #f #ff n) (extend_pred' #f #ff n);
+  assert approx' n (extend' #f #ff n x) ==
+    ff.fmap (compose (approx_pred' #f #ff n) (extend_pred' #f #ff n)) x;
+  f_ext (compose (approx_pred' #f #ff n) (extend_pred' n)) id (approx_extend_pred' n)
+
+let extend_approx_pred' #f (#ff: functor u#a f) (n: nat) : (pred'' ff ^-> pred'' ff) =
+  on_dom (pred'' ff) #(fun _ -> pred'' ff) fun p ->
+  on_dom nat #(fun m -> k' ff m ^-> prop) fun m ->
+  on_dom (k' ff m) #(fun _ -> prop) fun y ->
+  if m < n then p m y else False
+
+let approx_knot #f (#ff: functor u#a f) (n: nat) (x: knot_t ff) : knot_t ff =
+  ff.fmap (extend_approx_pred' n) x
+
+let extend_approx' #f (#ff: functor u#a f) n (x: knot_t ff) :
+    Lemma (extend' n (approx' n x) == approx_knot n x) =
+  ff.fmap_id _ x;
+  ff.fmap_comp _ _ _ (extend_pred' #f #ff n) (approx_pred' #f #ff n);
+  assert extend' n (approx' #f #ff n x) ==
+    ff.fmap (compose (extend_pred' #f #ff n) (approx_pred' #f #ff n)) x;
+  f_ext (compose (extend_pred' #f #ff n) (approx_pred' n)) (extend_approx_pred' n) fun p ->
+  f_ext (extend_pred' n (approx_pred' n p)) (extend_approx_pred' n p) fun m ->
+  f_ext (extend_pred' n (approx_pred' n p) m) (extend_approx_pred' n p m) fun x ->
+  ()
+
+let pack_pred #f (#ff: functor u#a f) : (predicate ff ^-> pred'' ff) =
+  on_dom (predicate ff) fun p -> on_dom nat fun m ->
+    on_dom (k' ff m) #(fun _ -> prop) fun x -> p m (extend' m x)
+
+let unpack_pred #f (#ff: functor u#a f) : (pred'' ff ^-> predicate ff) =
+  on_dom (pred'' ff) fun p -> on_dom nat fun i -> on_dom (knot_t ff) fun y -> p i (approx' i y)
+
+let pack_unpack_pred #f (ff: functor u#a f) (x: pred'' ff) =
+  f_ext (pack_pred (unpack_pred x)) x fun m ->
+  f_ext (pack_pred (unpack_pred x) m) (x m) fun x ->
+  approx_extend' m x
+
+let pack #f #ff = ff.fmap pack_pred
+let unpack #f #ff = ff.fmap unpack_pred
+
+// let unpack_pack_pred #f (#ff: functor u#a f) (n:nat) (x: predicate ff) =
+//   f_ext ((unpack_pred n (pack_pred n x))) (approx n x) fun _ -> ()
+
+let pack_unpack #f #ff x =
+  ff.fmap_comp (pred'' ff) _ (pred'' ff) pack_pred unpack_pred;
+  f_ext (compose pack_pred (unpack_pred #f #ff)) id (pack_unpack_pred ff);
+  ff.fmap_id _ x;
+  assert ff.fmap id x == x
+
+// let unpack_pack #f #ff n h =
+//   ff.fmap_comp _ _ _ (unpack_pred n) (pack_pred #f #ff n);
+//   f_ext (compose (unpack_pred n) (pack_pred #f #ff n)) (approx n) fun x -> unpack_pack_pred n x
